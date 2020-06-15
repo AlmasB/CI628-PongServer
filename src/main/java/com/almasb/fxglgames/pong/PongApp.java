@@ -37,6 +37,7 @@ import com.almasb.fxgl.physics.CollisionHandler;
 import com.almasb.fxgl.physics.HitBox;
 import com.almasb.fxgl.ui.UI;
 import javafx.geometry.Point2D;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
 import javafx.util.Duration;
@@ -127,7 +128,7 @@ public class PongApp extends GameApplication {
         getGameScene().setBackgroundColor(Color.rgb(0, 0, 5));
 
         initScreenBounds();
-        initGameObjects();
+        //initGameObjects();
     }
 
     @Override
@@ -169,6 +170,17 @@ public class PongApp extends GameApplication {
         controller.getLabelScoreEnemy().textProperty().bind(getip("player2score").asString());
 
         getGameScene().addUI(ui);
+
+        var field = new TextField();
+        field.setOnAction(e -> {
+            try {
+                server.messages.put(field.getText());
+            } catch (InterruptedException ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        addUINode(field, 100, 100);
     }
 
     @Override
@@ -176,11 +188,11 @@ public class PongApp extends GameApplication {
         if (!server.isConnected)
             return;
 
-        try {
-            server.data.put(playerBat.getEntity().getPosition());
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+//        try {
+//            server.data.put(playerBat.getEntity().getPosition());
+//        } catch (InterruptedException e) {
+//            e.printStackTrace();
+//        }
     }
 
     private void initScreenBounds() {
@@ -217,6 +229,7 @@ public class PongApp extends GameApplication {
 
     private class Server {
         private boolean isConnected = false;
+        private BlockingQueue<String> messages = new ArrayBlockingQueue<>(20);
         private BlockingQueue<Point2D> data = new ArrayBlockingQueue<>(20);
 
         private void run() {
@@ -246,26 +259,29 @@ public class PongApp extends GameApplication {
 
                 // TODO: clientSocket.isClosed()
                 while (true) {
-                    var p = data.take();
+//                    var p = data.take();
+//
+//                    int y = (int) p.getY();
+//
+//                    var s = String.valueOf(y);
+//
+//                    char[] buffer;
+//
+//                    if (s.length() == 3) {
+//                        buffer = s.toCharArray();
+//                    } else if (s.length() == 2) {
+//                        buffer = new char[3];
+//                        buffer[1] = s.charAt(0);
+//                        buffer[2] = s.charAt(1);
+//                    } else { // length == 1
+//                        buffer = new char[3];
+//                        buffer[2] = s.charAt(0);
+//                    }
 
-                    int y = (int) p.getY();
+                    var buffer = messages.take().toCharArray();
 
-                    var s = String.valueOf(y);
-
-                    char[] buffer;
-
-                    if (s.length() == 3) {
-                        buffer = s.toCharArray();
-                    } else if (s.length() == 2) {
-                        buffer = new char[3];
-                        buffer[1] = s.charAt(0);
-                        buffer[2] = s.charAt(1);
-                    } else { // length == 1
-                        buffer = new char[3];
-                        buffer[2] = s.charAt(0);
-                    }
-
-                    out.println(buffer);
+                    out.print(buffer);
+                    out.flush();
                 }
 
 //            while ((inputLine = in.) != null) {
