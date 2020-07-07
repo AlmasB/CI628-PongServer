@@ -36,6 +36,7 @@ import com.almasb.fxgl.input.UserAction;
 import com.almasb.fxgl.physics.CollisionHandler;
 import com.almasb.fxgl.physics.HitBox;
 import com.almasb.fxgl.ui.UI;
+import javafx.application.Platform;
 import javafx.geometry.Point2D;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
@@ -47,6 +48,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -69,6 +71,9 @@ public class PongApp extends GameApplication {
         settings.setFontUI("pong.ttf");
     }
 
+    private Entity player1;
+    private Entity player2;
+    private Entity ball;
     private BatComponent playerBat;
 
     private Server server;
@@ -98,6 +103,15 @@ public class PongApp extends GameApplication {
                 playerBat.stop();
             }
         }, KeyCode.S);
+
+        onKeyDown(KeyCode.Q, () -> {
+            // TODO: extract method
+            try {
+                server.messages.put("exit");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
     }
 
     @Override
@@ -128,7 +142,7 @@ public class PongApp extends GameApplication {
         getGameScene().setBackgroundColor(Color.rgb(0, 0, 5));
 
         initScreenBounds();
-        //initGameObjects();
+        initGameObjects();
     }
 
     @Override
@@ -180,7 +194,7 @@ public class PongApp extends GameApplication {
             }
         });
 
-        addUINode(field, 100, 100);
+        //addUINode(field, 100, 100);
     }
 
     @Override
@@ -188,11 +202,13 @@ public class PongApp extends GameApplication {
         if (!server.isConnected)
             return;
 
-//        try {
-//            server.data.put(playerBat.getEntity().getPosition());
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//        }
+        try {
+            var message = "GAME_DATA," + player1.getY() + "," + player2.getY() + "," + ball.getX() + "," + ball.getY();
+
+            server.messages.put(message);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     private void initScreenBounds() {
@@ -205,11 +221,11 @@ public class PongApp extends GameApplication {
     }
 
     private void initGameObjects() {
-        Entity ball = spawn("ball", getAppWidth() / 2 - 5, getAppHeight() / 2 - 5);
-        Entity bat1 = spawn("bat", new SpawnData(getAppWidth() / 4, getAppHeight() / 2 - 30).put("isPlayer", true));
-        Entity bat2 = spawn("bat", new SpawnData(3 * getAppWidth() / 4 - 20, getAppHeight() / 2 - 30).put("isPlayer", false));
+        ball = spawn("ball", getAppWidth() / 2 - 5, getAppHeight() / 2 - 5);
+        player1 = spawn("bat", new SpawnData(getAppWidth() / 4, getAppHeight() / 2 - 30).put("isPlayer", true));
+        player2 = spawn("bat", new SpawnData(3 * getAppWidth() / 4 - 20, getAppHeight() / 2 - 30).put("isPlayer", false));
 
-        playerBat = bat1.getComponent(BatComponent.class);
+        playerBat = player1.getComponent(BatComponent.class);
     }
 
     private void playHitAnimation(Entity bat) {
@@ -225,6 +241,20 @@ public class PongApp extends GameApplication {
 
     private void showGameOver(String winner) {
         getDisplay().showMessageBox(winner + " won! Demo over\nThanks for playing", getGameController()::exit);
+    }
+
+    private void handle(String key) {
+        if (key.equals("W_DOWN")) {
+            Platform.runLater(() -> {
+                getInput().mockKeyPress(KeyCode.W);
+            });
+        }
+
+        if (key.equals("W_UP")) {
+            Platform.runLater(() -> {
+                getInput().mockKeyRelease(KeyCode.W);
+            });
+        }
     }
 
     private class Server {
@@ -246,52 +276,39 @@ public class PongApp extends GameApplication {
                 isConnected = true;
                 clientSocket.setTcpNoDelay(true);
 
+                // input thread
+                new Thread(() -> {
+                    try {
+                        char[] buf = new char[36];
 
+                        int len;
 
-                char[] buf = new char[36];
+                        while ((len = in.read(buf)) > 0) {
+                            var message = new String(Arrays.copyOf(buf, len));
 
-                int len;
+                            System.out.println("Recv message: " + message);
 
-//                while ((len = in.read(buf)) > 0) {
-//                    System.out.println(new String(Arrays.copyOf(buf, len)));
-//                }
+                            var tokens = message.split(",");
 
+                            Arrays.stream(tokens).skip(1).forEach(key -> handle(key));
+                        }
+                    } catch (SocketException e) {
+                        System.out.println("Connection closed: " + e.getMessage());
+                    } catch (Exception e) {
+                        System.out.println("Error recv: " + e);
+                        e.printStackTrace();
+                    }
+                }).start();
 
+                // output
                 // TODO: clientSocket.isClosed()
                 while (true) {
-//                    var p = data.take();
-//
-//                    int y = (int) p.getY();
-//
-//                    var s = String.valueOf(y);
-//
-//                    char[] buffer;
-//
-//                    if (s.length() == 3) {
-//                        buffer = s.toCharArray();
-//                    } else if (s.length() == 2) {
-//                        buffer = new char[3];
-//                        buffer[1] = s.charAt(0);
-//                        buffer[2] = s.charAt(1);
-//                    } else { // length == 1
-//                        buffer = new char[3];
-//                        buffer[2] = s.charAt(0);
-//                    }
+                    var message = messages.take().toCharArray();
 
-                    var buffer = messages.take().toCharArray();
-
-                    out.print(buffer);
+                    out.print(message);
                     out.flush();
                 }
 
-//            while ((inputLine = in.) != null) {
-//                System.out.println("Input: " + inputLine);
-//
-//                //outputLine = "Bye.";
-//                //out.println(outputLine);
-//                if (outputLine.equals("Bye."))
-//                    break;
-//            }
             } catch (Exception e) {
                 System.out.println("Exception caught when trying to listen on port "
                         + portNumber + " or listening for a connection");
