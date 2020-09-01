@@ -27,34 +27,32 @@
 package com.almasb.fxglgames.pong;
 
 import com.almasb.fxgl.animation.Interpolators;
+import com.almasb.fxgl.app.ApplicationMode;
 import com.almasb.fxgl.app.GameApplication;
 import com.almasb.fxgl.app.GameSettings;
 import com.almasb.fxgl.core.math.FXGLMath;
 import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.entity.SpawnData;
 import com.almasb.fxgl.input.UserAction;
+import com.almasb.fxgl.net.*;
 import com.almasb.fxgl.physics.CollisionHandler;
 import com.almasb.fxgl.physics.HitBox;
 import com.almasb.fxgl.ui.UI;
-import javafx.application.Platform;
-import javafx.geometry.Point2D;
-import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.paint.Color;
 import javafx.util.Duration;
 
-import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
 import static com.almasb.fxgl.dsl.FXGL.*;
+import static com.almasb.fxglgames.pong.NetworkMessages.*;
 
 /**
  * A simple clone of Pong.
@@ -62,56 +60,73 @@ import static com.almasb.fxgl.dsl.FXGL.*;
  *
  * @author Almas Baimagambetov (AlmasB) (almaslvl@gmail.com)
  */
-public class PongApp extends GameApplication {
+public class PongApp extends GameApplication implements MessageHandler<String> {
 
     @Override
     protected void initSettings(GameSettings settings) {
         settings.setTitle("Pong");
         settings.setVersion("1.0");
         settings.setFontUI("pong.ttf");
+        settings.setApplicationMode(ApplicationMode.DEBUG);
     }
 
     private Entity player1;
     private Entity player2;
     private Entity ball;
-    private BatComponent playerBat;
+    private BatComponent player1Bat;
+    private BatComponent player2Bat;
 
-    private Server server;
+    private Server<String> server;
 
     @Override
     protected void initInput() {
-        getInput().addAction(new UserAction("Up") {
+        getInput().addAction(new UserAction("Up1") {
             @Override
             protected void onAction() {
-                playerBat.up();
+                player1Bat.up();
             }
 
             @Override
             protected void onActionEnd() {
-                playerBat.stop();
+                player1Bat.stop();
             }
         }, KeyCode.W);
 
-        getInput().addAction(new UserAction("Down") {
+        getInput().addAction(new UserAction("Down1") {
             @Override
             protected void onAction() {
-                playerBat.down();
+                player1Bat.down();
             }
 
             @Override
             protected void onActionEnd() {
-                playerBat.stop();
+                player1Bat.stop();
             }
         }, KeyCode.S);
 
-        onKeyDown(KeyCode.Q, () -> {
-            // TODO: extract method
-            try {
-                server.messages.put("exit");
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        getInput().addAction(new UserAction("Up2") {
+            @Override
+            protected void onAction() {
+                player2Bat.up();
             }
-        });
+
+            @Override
+            protected void onActionEnd() {
+                player2Bat.stop();
+            }
+        }, KeyCode.I);
+
+        getInput().addAction(new UserAction("Down2") {
+            @Override
+            protected void onAction() {
+                player2Bat.down();
+            }
+
+            @Override
+            protected void onActionEnd() {
+                player2Bat.stop();
+            }
+        }, KeyCode.K);
     }
 
     @Override
@@ -122,27 +137,34 @@ public class PongApp extends GameApplication {
 
     @Override
     protected void initGame() {
-        server = new Server();
-        server.start();
+        Writers.INSTANCE.addWriter(Protocol.TCP, String.class, outputStream -> new MessageWriter<Object>() {
 
-//        getGameState().<Integer>addListener("player1score", (old, newScore) -> {
-//            if (newScore == 11) {
-//                showGameOver("Player 1");
-//            }
-//        });
-//
-//        getGameState().<Integer>addListener("player2score", (old, newScore) -> {
-//            if (newScore == 11) {
-//                showGameOver("Player 2");
-//            }
-//        });
+            private MessageWriterS writer = new MessageWriterS(outputStream);
+
+            @Override
+            public void write(Object o) throws Exception {
+                var s = (String) o;
+
+                writer.write(s);
+            }
+        });
+        Readers.INSTANCE.addReader(String.class, in -> new MessageReaderS(in));
+
+        server = getNetService().newTCPServer(55555, String.class);
+
+        server.setOnConnected(connection -> {
+            connection.addMessageHandlerFX(this);
+        });
 
         getGameWorld().addEntityFactory(new PongFactory());
-
         getGameScene().setBackgroundColor(Color.rgb(0, 0, 5));
 
         initScreenBounds();
         initGameObjects();
+
+        var t = new Thread(server.startTask()::run);
+        t.setDaemon(true);
+        t.start();
     }
 
     @Override
@@ -154,11 +176,22 @@ public class PongApp extends GameApplication {
             protected void onHitBoxTrigger(Entity a, Entity b, HitBox boxA, HitBox boxB) {
                 if (boxB.getName().equals("LEFT")) {
                     inc("player2score", +1);
+
+                    server.broadcast("SCORES," + geti("player1score") + "," + geti("player2score"));
+
+                    server.broadcast(HIT_WALL_LEFT);
                 } else if (boxB.getName().equals("RIGHT")) {
                     inc("player1score", +1);
+
+                    server.broadcast("SCORES," + geti("player1score") + "," + geti("player2score"));
+
+                    server.broadcast(HIT_WALL_RIGHT);
+                } else if (boxB.getName().equals("TOP")) {
+                    server.broadcast(HIT_WALL_UP);
+                } else if (boxB.getName().equals("BOT")) {
+                    server.broadcast(HIT_WALL_DOWN);
                 }
 
-                play("hit_wall.wav");
                 getGameScene().getViewport().shakeTranslational(5);
             }
         });
@@ -166,8 +199,9 @@ public class PongApp extends GameApplication {
         CollisionHandler ballBatHandler = new CollisionHandler(EntityType.BALL, EntityType.PLAYER_BAT) {
             @Override
             protected void onCollisionBegin(Entity a, Entity bat) {
-                play("hit_bat.wav");
                 playHitAnimation(bat);
+
+                server.broadcast(bat == player1 ? BALL_HIT_BAT1 : BALL_HIT_BAT2);
             }
         };
 
@@ -184,30 +218,14 @@ public class PongApp extends GameApplication {
         controller.getLabelScoreEnemy().textProperty().bind(getip("player2score").asString());
 
         getGameScene().addUI(ui);
-
-        var field = new TextField();
-        field.setOnAction(e -> {
-            try {
-                server.messages.put(field.getText());
-            } catch (InterruptedException ex) {
-                ex.printStackTrace();
-            }
-        });
-
-        //addUINode(field, 100, 100);
     }
 
     @Override
     protected void onUpdate(double tpf) {
-        if (!server.isConnected)
-            return;
-
-        try {
+        if (!server.getConnections().isEmpty()) {
             var message = "GAME_DATA," + player1.getY() + "," + player2.getY() + "," + ball.getX() + "," + ball.getY();
 
-            server.messages.put(message);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+            server.broadcast(message);
         }
     }
 
@@ -225,7 +243,8 @@ public class PongApp extends GameApplication {
         player1 = spawn("bat", new SpawnData(getAppWidth() / 4, getAppHeight() / 2 - 30).put("isPlayer", true));
         player2 = spawn("bat", new SpawnData(3 * getAppWidth() / 4 - 20, getAppHeight() / 2 - 30).put("isPlayer", false));
 
-        playerBat = player1.getComponent(BatComponent.class);
+        player1Bat = player1.getComponent(BatComponent.class);
+        player2Bat = player2.getComponent(BatComponent.class);
     }
 
     private void playHitAnimation(Entity bat) {
@@ -239,90 +258,72 @@ public class PongApp extends GameApplication {
                 .buildAndPlay();
     }
 
-    private void showGameOver(String winner) {
-        getDisplay().showMessageBox(winner + " won! Demo over\nThanks for playing", getGameController()::exit);
-    }
+    @Override
+    public void onReceive(Connection<String> connection, String message) {
+        var tokens = message.split(",");
 
-    private void handle(String key) {
-        if (key.equals("W_DOWN")) {
-            Platform.runLater(() -> {
-                getInput().mockKeyPress(KeyCode.W);
-            });
-        }
-
-        if (key.equals("W_UP")) {
-            Platform.runLater(() -> {
-                getInput().mockKeyRelease(KeyCode.W);
-            });
-        }
-    }
-
-    private class Server {
-        private boolean isConnected = false;
-        private BlockingQueue<String> messages = new ArrayBlockingQueue<>(20);
-        private BlockingQueue<Point2D> data = new ArrayBlockingQueue<>(20);
-
-        private void run() {
-            int portNumber = 55555;
-
-            System.out.println("Listening on " + portNumber);
-
-            try (ServerSocket serverSocket = new ServerSocket(portNumber);
-                 Socket clientSocket = serverSocket.accept();
-                 PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-                 var in = new InputStreamReader(clientSocket.getInputStream());
-            ) {
-
-                isConnected = true;
-                clientSocket.setTcpNoDelay(true);
-
-                // input thread
-                new Thread(() -> {
-                    try {
-                        char[] buf = new char[36];
-
-                        int len;
-
-                        while ((len = in.read(buf)) > 0) {
-                            var message = new String(Arrays.copyOf(buf, len));
-
-                            System.out.println("Recv message: " + message);
-
-                            var tokens = message.split(",");
-
-                            Arrays.stream(tokens).skip(1).forEach(key -> handle(key));
-                        }
-                    } catch (SocketException e) {
-                        System.out.println("Connection closed: " + e.getMessage());
-                    } catch (Exception e) {
-                        System.out.println("Error recv: " + e);
-                        e.printStackTrace();
-                    }
-                }).start();
-
-                // output
-                // TODO: clientSocket.isClosed()
-                while (true) {
-                    var message = messages.take().toCharArray();
-
-                    out.print(message);
-                    out.flush();
-                }
-
-            } catch (Exception e) {
-                System.out.println("Exception caught when trying to listen on port "
-                        + portNumber + " or listening for a connection");
-                System.out.println(e.getMessage());
+        Arrays.stream(tokens).skip(1).forEach(key -> {
+            if (key.endsWith("_DOWN")) {
+                getInput().mockKeyPress(KeyCode.valueOf(key.substring(0, 1)));
+            } else if (key.endsWith("_UP")) {
+                getInput().mockKeyRelease(KeyCode.valueOf(key.substring(0, 1)));
             }
+        });
+    }
 
-            isConnected = false;
-            System.out.println("Connection closed");
+    static class MessageWriterS implements MessageWriter<String> {
+
+        private OutputStream os;
+        private PrintWriter out;
+
+        MessageWriterS(OutputStream os) {
+            this.os = os;
+            out = new PrintWriter(os, true);
         }
 
-        public void start() {
-            Thread t = new Thread(this::run);
+        @Override
+        public void write(String s) throws Exception {
+            out.print(s.toCharArray());
+            out.flush();
+        }
+    }
+
+    static class MessageReaderS implements MessageReader<String> {
+
+        private BlockingQueue<String> messages = new ArrayBlockingQueue<>(50);
+
+        private InputStreamReader in;
+
+        MessageReaderS(InputStream is) {
+            in =  new InputStreamReader(is);
+
+            var t = new Thread(() -> {
+                try {
+
+                    char[] buf = new char[36];
+
+                    int len;
+
+                    while ((len = in.read(buf)) > 0) {
+                        var message = new String(Arrays.copyOf(buf, len));
+
+                        System.out.println("Recv message: " + message);
+
+                        messages.put(message);
+                    }
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+
             t.setDaemon(true);
             t.start();
+        }
+
+        @Override
+        public String read() throws Exception {
+            return messages.take();
         }
     }
 

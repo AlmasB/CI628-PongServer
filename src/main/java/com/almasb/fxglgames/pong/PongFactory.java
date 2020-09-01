@@ -77,8 +77,7 @@ public class PongFactory implements EntityFactory {
         emitter.setSize(5, 10);
         emitter.setEmissionRate(1);
 
-        return entityBuilder()
-                .from(data)
+        return entityBuilder(data)
                 .type(EntityType.BALL)
                 .bbox(new HitBox(BoundingShape.circle(5)))
                 .with(physics)
@@ -95,13 +94,12 @@ public class PongFactory implements EntityFactory {
         PhysicsComponent physics = new PhysicsComponent();
         physics.setBodyType(BodyType.KINEMATIC);
 
-        return entityBuilder()
-                .from(data)
+        return entityBuilder(data)
                 .type(isPlayer ? EntityType.PLAYER_BAT : EntityType.ENEMY_BAT)
                 .viewWithBBox(new Rectangle(20, 60, Color.LIGHTGRAY))
                 .with(new CollidableComponent(true))
                 .with(physics)
-                .with(isPlayer ? new BatComponent() : new EnemyBatComponent())
+                .with(new BatComponent())
                 .build();
     }
 }
