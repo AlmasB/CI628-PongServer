@@ -137,20 +137,10 @@ public class PongApp extends GameApplication implements MessageHandler<String> {
 
     @Override
     protected void initGame() {
-        Writers.INSTANCE.addWriter(Protocol.TCP, String.class, outputStream -> new MessageWriter<Object>() {
+        Writers.INSTANCE.addTCPWriter(String.class, outputStream -> new MessageWriterS(outputStream));
+        Readers.INSTANCE.addTCPReader(String.class, in -> new MessageReaderS(in));
 
-            private MessageWriterS writer = new MessageWriterS(outputStream);
-
-            @Override
-            public void write(Object o) throws Exception {
-                var s = (String) o;
-
-                writer.write(s);
-            }
-        });
-        Readers.INSTANCE.addReader(String.class, in -> new MessageReaderS(in));
-
-        server = getNetService().newTCPServer(55555, String.class);
+        server = getNetService().newTCPServer(55555, new ServerConfig<>(String.class));
 
         server.setOnConnected(connection -> {
             connection.addMessageHandlerFX(this);
@@ -271,7 +261,7 @@ public class PongApp extends GameApplication implements MessageHandler<String> {
         });
     }
 
-    static class MessageWriterS implements MessageWriter<String> {
+    static class MessageWriterS implements TCPMessageWriter<String> {
 
         private OutputStream os;
         private PrintWriter out;
@@ -288,7 +278,7 @@ public class PongApp extends GameApplication implements MessageHandler<String> {
         }
     }
 
-    static class MessageReaderS implements MessageReader<String> {
+    static class MessageReaderS implements TCPMessageReader<String> {
 
         private BlockingQueue<String> messages = new ArrayBlockingQueue<>(50);
 
